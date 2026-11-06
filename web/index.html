@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>kora_image_maker</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; font-family: system-ui, sans-serif; }
+    /* CEF layers never reach the game-view texture, so this indicator is visible
+       to the player but not in the recording. */
+    #rec {
+      display: none; position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+      padding: 8px 16px; border-radius: 999px; background: rgba(15, 15, 18, .85); color: #fff;
+      font-size: 15px; font-weight: 600; letter-spacing: .02em; white-space: nowrap;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, .35);
+    }
+    #rec .dot { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%; background: #ef4444; animation: blink 1s infinite; }
+    #rec .hint { font-weight: 400; opacity: .75; margin-left: 10px; }
+    @keyframes blink { 50% { opacity: .25; } }
+  </style>
+</head>
+<body>
+  <div id="rec"><span class="dot"></span><span id="rec-text">REC 0:00</span><span class="hint" id="rec-hint"></span></div>
+  <script src="app.js"></script>
+</body>
+</html>
