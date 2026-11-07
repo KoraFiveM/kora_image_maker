@@ -133,12 +133,17 @@ onNet('kora_image_maker:server:chunk', (id, i, data) => {
 	const src = source;
 	const key = `${src}:${id}`;
 	const upload = uploads.get(key);
-	if (!upload) return;
-	if (!Number.isInteger(i) || i < 0 || i >= upload.n || typeof data !== 'string' || upload.parts[i] !== undefined) return;
+	const ack = (ok) => emitNet('kora_image_maker:client:chunkAck', src, id, i, ok);
+	if (!upload) return ack(false);
+	if (!Number.isInteger(i) || i < 0 || i >= upload.n || typeof data !== 'string' || upload.parts[i] !== undefined) return ack(false);
 
 	upload.parts[i] = data;
 	upload.size += data.length;
-	if (upload.size > Math.ceil(MAX_BYTES / 3) * 4 + 4) return drop(key, src, id, 'File too large.');
+	if (upload.size > Math.ceil(MAX_BYTES / 3) * 4 + 4) {
+		ack(false);
+		return drop(key, src, id, 'File too large.');
+	}
+	ack(true);
 	if (++upload.got === upload.n) finalize(key, upload);
 });
 

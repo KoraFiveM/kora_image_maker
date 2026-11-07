@@ -8,6 +8,7 @@ local Capture = {}
 ImageMaker.capture = Capture
 
 local LATENT_BPS = 2 * 1024 * 1024
+local CHUNK_ACK_TIMEOUT = 30000
 local jobs = {}
 local seq = 0
 
@@ -129,12 +130,37 @@ RegisterNUICallback('uploadBegin', function(data, cb)
     cb({ ok = true })
 end)
 
+-- One chunk in flight at a time: the page waits on this callback, which waits
+-- for the server's ack. Queueing every chunk at once overflowed FiveM's latent
+-- event buffer and got the player dropped ("latent event packet overflow").
+local acks = {}
+
 RegisterNUICallback('uploadChunk', function(data, cb)
     local job = type(data) == 'table' and jobs[data.id]
     local i = job and math.tointeger(tonumber(data.i))
     if not i or type(data.data) ~= 'string' then return cb({ ok = false, error = 'Bad chunk.' }) end
+
+    local key = ('%s:%d'):format(job.id, i)
+    local p = promise.new()
+    acks[key] = p
+    SetTimeout(CHUNK_ACK_TIMEOUT, function()
+        if acks[key] == p then
+            acks[key] = nil
+            p:resolve(false)
+        end
+    end)
     TriggerLatentServerEvent('kora_image_maker:server:chunk', LATENT_BPS, job.id, i, data.data)
-    cb({ ok = true })
+
+    if Citizen.Await(p) then return cb({ ok = true }) end
+    cb({ ok = false, error = 'Server did not confirm the upload.' })
+end)
+
+RegisterNetEvent('kora_image_maker:client:chunkAck', function(id, i, ok)
+    local key = ('%s:%s'):format(tostring(id), tostring(math.tointeger(i) or i))
+    local p = acks[key]
+    if not p then return end
+    acks[key] = nil
+    p:resolve(ok == true)
 end)
 
 RegisterNetEvent('kora_image_maker:client:saved', function(id, ok, pathOrError)

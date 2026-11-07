@@ -292,9 +292,12 @@ let recording = null;
 
 function pickVideoMime() {
   if (typeof MediaRecorder === 'undefined') return null;
+  // avc3 carries codec parameters in-band, so the encoder may reconfigure
+  // mid-recording; avc1 warns and can produce a broken file when it does.
   const candidates = [
-    'video/mp4;codecs=avc1',
+    'video/mp4;codecs=avc3',
     'video/webm;codecs=vp8',
+    'video/mp4;codecs=avc1',
     'video/webm;codecs=vp9',
     'video/webm',
   ];
