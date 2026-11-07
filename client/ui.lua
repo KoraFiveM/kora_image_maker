@@ -206,10 +206,17 @@ local function recordEntityVideo(value)
     local seconds = clampNumber(value.seconds, 2, 30, 8)
     local zoom = clampNumber(value.zoom, 0.2, 5.0, 1.0)
     local pitch = tonumber(value.height) or 12
-    local motion = value.motion == 'spin' and 'spin' or 'orbit'
+    local motion = value.motion == 'details' and 'details' or 'orbit'
+
+    -- Detail fly-around needs vehicle bones; anything else falls back to orbit.
+    local plan, fellBack
+    if motion == 'details' then
+        plan = Room.planBoneTour(seconds, pitch, zoom)
+        if not plan then motion, fellBack = 'orbit', true end
+    end
 
     Room.setEntityHeading(0.0)
-    Room.aim(-40, pitch, zoom)
+    if plan then Room.tourAt(plan, 0.0) else Room.aim(-40, pitch, zoom) end
     Wait(150)
 
     local job, err = Capture.startVideo({ kind = 'video', model = model, motion = motion }, {
@@ -220,21 +227,20 @@ local function recordEntityVideo(value)
         seconds = seconds,
         discord = discord ~= nil,
     })
-    if not job then return notice('destructive', err) end
+    if not job then
+        Room.setFov()
+        return notice('destructive', err)
+    end
 
     local startedAt = GetGameTimer()
     local duration = seconds * 1000
     while true do
         local t = (GetGameTimer() - startedAt) / duration
         if t >= 1.0 then break end
-        if motion == 'spin' then
-            Room.setEntityHeading(t * 360.0)
-        else
-            Room.aim(-40 + t * 360.0, pitch, zoom)
-        end
+        if plan then Room.tourAt(plan, t) else Room.aim(-40 + t * 360.0, pitch, zoom) end
         Wait(0)
     end
-    Room.setEntityHeading(0.0)
+    Room.setFov()
 
     local target = discord and { url = discord.url, content = ('**%s** · %s · %ds %s'):format(model, entityType, seconds, motion) }
     local result = Capture.stopVideo(job, target)
@@ -242,8 +248,9 @@ local function recordEntityVideo(value)
     recordResult(('%s %s video'):format(model, motion), 'video', captureId, result)
     if not result.ok then return refresh(notice('destructive', result.error or 'Recording failed.')) end
     local message = ('Saved %s (%s).'):format(result.path, fmtBytes(result.bytes))
+    if fellBack then message = message .. ' Detail fly-around is vehicles only, so it orbited instead.' end
     if result.discord and not result.discord.ok then return refresh(notice('warning', message .. ' Discord: ' .. result.discord.error)) end
-    return refresh(notice('success', message))
+    return refresh(notice(fellBack and 'warning' or 'success', message))
 end
 
 -- ------------------------------------------------------------------ scene
@@ -456,9 +463,11 @@ appDefinition = function()
                                     fields = {
                                         { id = 'model', label = 'Model', type = 'text', placeholder = 'Blank = current model' },
                                         { id = 'motion', label = 'Motion', type = 'select', default = 'orbit', options = {
-                                            { value = 'orbit', label = 'Camera orbits' }, { value = 'spin', label = 'Model spins (turntable)' },
+                                            { value = 'orbit', label = 'Camera orbits' },
+                                            { value = 'details', label = 'Fly around details (vehicles)' },
                                         } },
-                                        { id = 'seconds', label = 'Length (seconds)', type = 'number', default = 8, min = 2, max = 30, wholeNumber = true },
+                                        { id = 'seconds', label = 'Length (seconds)', type = 'number', default = 8, min = 2, max = 30, wholeNumber = true,
+                                          description = 'Detail fly-around spends about 1.3 s per detail; 15-20 s shows them all.' },
                                         { id = 'height', label = 'Camera height', type = 'select', default = '12', options = {
                                             { value = '4', label = 'Low' }, { value = '12', label = 'Mid' }, { value = '30', label = 'High' },
                                         } },
