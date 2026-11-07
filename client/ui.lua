@@ -193,6 +193,7 @@ local function readFrame(value)
 end
 
 local function applyFrame()
+    Scene.setAspect(0)
     Scene.setLens(frame.lens)
     Scene.setDof(frame.dof)
     local cam, target = Shots.angle(frame.angle, Scene.context(), frame.zoom)
@@ -273,6 +274,7 @@ local function takePhotos(value)
         else
             Scene.setLens(lens)
             Scene.setDof(value.dof == true)
+            Scene.setAspect(opts.crop and 0 or opts.aspect)
             for _, angle in ipairs(angles) do
                 local angleId = angle == 'current' and frame.angle or angle
                 local zoom = angle == 'current' and frame.zoom or clampNumber(value.zoom, 0.2, 5.0, 1.0)
@@ -312,6 +314,7 @@ local function shootVideo(value)
     local seconds = clampNumber(value.seconds, 2, 60, 10)
     Scene.setLens(value.lens or frame.lens)
     Scene.setDof(value.dof == true)
+    Scene.setAspect(tonumber(value.aspect) or 0)
     local eval, used = Shots.move(value.motion or 'orbit', Scene.context(), {
         seconds = seconds, pitch = tonumber(value.height) or 12, zoom = clampNumber(value.zoom, 0.2, 5.0, 1.0),
     })
@@ -660,14 +663,14 @@ local function shootView()
                                 { id = 'motion', label = 'Move', type = 'select', default = 'montage', options = options(Shots.moves) },
                                 { id = 'seconds', label = 'Length (seconds)', type = 'number', default = 12, min = 2, max = 60, wholeNumber = true,
                                   description = 'Detail fly-around: ~1.3 s per detail.' },
-                                { id = 'lens', label = 'Lens', type = 'select', default = '24', options = LENSES },
+                                { id = 'lens', label = 'Lens', type = 'select', default = '35', options = LENSES },
                                 { id = 'zoom', label = 'Zoom', type = 'range', default = 1, min = 0.3, max = 3, step = 0.05 },
                                 { id = 'height', label = 'Camera height', type = 'select', default = '12', options = {
                                     { value = '3', label = 'Low' }, { value = '12', label = 'Mid' }, { value = '30', label = 'High' },
                                 } },
                                 { id = 'dof', label = 'Depth of field', type = 'checkbox', default = true },
                                 { id = 'shake', label = 'Handheld shake', type = 'checkbox', default = false },
-                                aspectField('2.3333'),
+                                aspectField('1.7778'),
                                 qualityField(),
                                 { id = 'background', label = 'Studio background', type = 'select', default = 'black', options = {
                                     { value = 'black', label = 'Black' }, { value = 'white', label = 'White' }, { value = 'green', label = 'Green screen' },

@@ -13,6 +13,13 @@ TriggerClientEvent('chat:addSuggestion', -1, '/image_maker', 'Open the image mak
 
 -- Client-side failures (model/entity/capture) have no server trace by default --
 -- mirrored here so they show up without needing the player's own F8 console.
+-- One-line client diagnostics (e.g. measured subject size), capped and admin-only.
+RegisterNetEvent('kora_image_maker:server:diag', function(message)
+    local src = source
+    if type(message) ~= 'string' or not exports['kora_core']:hasPermission(src, 'admin') then return end
+    print(('[kora_image_maker] %s: %s'):format(GetPlayerName(src) or src, message:sub(1, 300)))
+end)
+
 RegisterNetEvent('kora_image_maker:server:clientError', function(tag, ...)
     print(('[kora_image_maker] client error from %s: %s'):format(GetPlayerName(source) or source, tag), ...)
 end)

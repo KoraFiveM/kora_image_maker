@@ -167,7 +167,8 @@ local state = {
     dof = false,
     steer = 0.0,
     entity = nil, model = nil, type = nil,
-    min = nil, max = nil, center = nil, radius = nil,
+    min = nil, max = nil, center = nil, radius = nil, hash = nil,
+    aspect = 0,        -- output shape (w/h) being framed for; 0 = full screen
     returnTo = nil,
 }
 
@@ -259,7 +260,8 @@ end
 local function removeEntity()
     if state.entity and DoesEntityExist(state.entity) then Kora.entities.remove(state.entity) end
     state.entity, state.model, state.type = nil, nil, nil
-    state.min, state.max, state.center, state.radius = nil, nil, nil, nil
+    if state.hash then SetModelAsNoLongerNeeded(state.hash) end
+    state.min, state.max, state.center, state.radius, state.hash = nil, nil, nil, nil, nil
     state.steer = 0.0
 end
 
@@ -360,6 +362,29 @@ local function settleVehicle(entity)
     FreezeEntityPosition(entity, true)
 end
 
+local FALLBACK_SIZE = {
+    veh = { vector3(-1.0, -2.4, -0.6), vector3(1.0, 2.4, 0.9) },
+    ped = { vector3(-0.4, -0.3, -1.0), vector3(0.4, 0.3, 0.9) },
+    obj = { vector3(-0.5, -0.5, 0.0), vector3(0.5, 0.5, 1.0) },
+}
+
+local function measure(entity, entityType)
+    local hash = GetEntityModel(entity)
+    RequestModel(hash)
+    local deadline = GetGameTimer() + 3000
+    local min, max = GetModelDimensions(hash)
+    while #(max - min) < 0.2 and GetGameTimer() < deadline do
+        Wait(50)
+        min, max = GetModelDimensions(hash)
+    end
+    if #(max - min) < 0.2 then
+        TriggerServerEvent('kora_image_maker:server:clientError', 'model dimensions came back empty; using a default size', hash, entityType)
+        local f = FALLBACK_SIZE[entityType] or FALLBACK_SIZE.obj
+        min, max = f[1], f[2]
+    end
+    return min, max
+end
+
 ---@return integer|false entity, string? typeOrError
 function Scene.spawn(model)
     if not state.active then return false, 'No scene is set up.' end
@@ -372,6 +397,11 @@ function Scene.spawn(model)
     local entity, err = Kora.entities.create(model, vector3(o.x, o.y, o.z + lift), { preset = 'static', heading = o.w })
     if not entity then return false, ('Could not spawn %s: %s'):format(model, tostring(err)) end
 
+    -- Read the size now and keep the model resident: kora_lib releases it
+    -- straight after spawning, and a released model can report empty
+    -- dimensions later, which framed every shot inches from the paint.
+    local min, max = measure(entity, entityType)
+
     if entityType == 'veh' then
         SetVehicleEngineOn(entity, false, true, true)
         SetVehicleDirtLevel(entity, 0.0)
@@ -382,12 +412,14 @@ function Scene.spawn(model)
         PlaceObjectOnGroundProperly(entity)
     end
 
-    local min, max = GetModelDimensions(GetEntityModel(entity))
     state.entity, state.model, state.type = entity, model, entityType
+    state.hash = GetEntityModel(entity)
     state.min, state.max = min, max
     state.center = (min + max) / 2
     state.radius = math.max(#(max - min) / 2, 0.15)
     state.half = math.max(15.0, math.min(60.0, state.radius * 5.0))
+    TriggerServerEvent('kora_image_maker:server:diag', ('spawned %s (%s) radius %.2f m, size %.1f x %.1f x %.1f')
+        :format(model, entityType, state.radius, max.x - min.x, max.y - min.y, max.z - min.z))
 
     -- High-detail textures and LODs need a moment to stream in.
     Wait(500)
@@ -479,8 +511,13 @@ function Scene.context()
     return {
         entity = state.entity, type = state.type,
         min = state.min, max = state.max, center = state.center, radius = state.radius,
-        fov = state.fov,
+        fov = state.fov, aspect = state.aspect, screenAspect = GetAspectRatio(false),
     }
+end
+
+---Output shape (width/height) shots should be framed for; 0 = full screen.
+function Scene.setAspect(aspect)
+    state.aspect = tonumber(aspect) or 0
 end
 
 ---Entity-local position of a named bone, or nil if the model doesn't have it.
@@ -567,9 +604,25 @@ local function norm(v)
     return v / len
 end
 
----Distance that fits the subject's bounding sphere in frame.
+-- Half-angle (as a tangent) of the narrower side of the final frame: the
+-- vertical FOV, reduced when the output is cropped wider than the screen
+-- (21:9), or the horizontal one when cropped taller (9:16).
+local function halfTan(ctx)
+    local screen = (ctx.screenAspect or 0) > 0 and ctx.screenAspect or 16 / 9
+    local out = (ctx.aspect or 0) > 0 and ctx.aspect or screen
+    local tv = math.tan(rad(ctx.fov / 2)) * math.min(1.0, screen / out)
+    return math.min(tv, tv * out)
+end
+
+---Distance that fits the subject's bounding sphere in the final frame.
 local function fit(ctx, zoom)
-    return ctx.radius / sin(rad(ctx.fov / 2)) * 1.05 / (zoom or 1.0)
+    return ctx.radius / sin(math.atan(halfTan(ctx))) * 1.1 / (zoom or 1.0)
+end
+
+---Multiplier for close-up distances so they frame the same at any lens/shape
+---as they would at a 35° full-screen view.
+local function lensScale(ctx)
+    return math.tan(rad(17.5)) / halfTan(ctx)
 end
 
 ---Point on a sphere around the subject centre. heading 0 = front, -90 = driver side.
@@ -624,7 +677,7 @@ local special = {}
 
 function special.wheel(ctx, zoom)
     local wheel = Scene.boneLocal('wheel_lf') or vector3(ctx.min.x, ctx.max.y * 0.6, ctx.min.z + 0.35)
-    local d = (1.1 + ctx.radius * 0.1) / zoom
+    local d = (1.2 + ctx.radius * 0.15) * lensScale(ctx) / zoom
     return wheel + norm(vector3(-1.0, 0.55, 0.12)) * d, wheel
 end
 
@@ -636,12 +689,14 @@ end
 
 function special.engine(ctx, zoom)
     local bay = vector3(0.0, ctx.max.y * 0.55, ctx.center.z + height(ctx) * 0.1)
-    return vector3(0.0, ctx.max.y + 0.7 / zoom, ctx.max.z + 0.9 / zoom), bay
+    local k = lensScale(ctx) / zoom
+    return vector3(0.0, ctx.max.y + 0.8 * k, ctx.max.z + 1.0 * k), bay
 end
 
 function special.trunk(ctx, zoom)
     local boot = vector3(0.0, ctx.min.y * 0.6, ctx.center.z + height(ctx) * 0.05)
-    return vector3(0.0, ctx.min.y - 0.9 / zoom, ctx.max.z + 0.8 / zoom), boot
+    local k = lensScale(ctx) / zoom
+    return vector3(0.0, ctx.min.y - 1.0 * k, ctx.max.z + 0.9 * k), boot
 end
 
 function special.portrait(ctx, zoom)
@@ -651,7 +706,7 @@ function special.portrait(ctx, zoom)
         local w = GetPedBoneCoords(e, 31086, 0.0, 0.0, 0.0)
         head = GetOffsetFromEntityGivenWorldCoords(e, w.x, w.y, w.z)
     end
-    return vector3(head.x, head.y + 1.1 / zoom, head.z), vector3(head.x, head.y, head.z - 0.08)
+    return vector3(head.x, head.y + 1.1 * lensScale(ctx) / zoom, head.z), vector3(head.x, head.y, head.z - 0.08)
 end
 
 local VEHICLE_ONLY = { wheel = true, interior = true, engine = true, trunk = true }
@@ -725,7 +780,7 @@ local TOUR_HOLD, TOUR_PUSH, TOUR_MIN_SHOT = 0.35, 0.12, 1.3
 
 local function planTour(ctx, opts)
     if ctx.type ~= 'veh' then return nil end
-    local dist = (0.9 + ctx.radius * 0.25) / opts.zoom
+    local dist = (1.2 + ctx.radius * 0.3) * lensScale(ctx) / opts.zoom
     local shots = {}
     for _, name in ipairs(TOUR_BONES) do
         local bone = Scene.boneLocal(name)
@@ -789,13 +844,13 @@ function builders.hero(ctx, o)
     local lowered = ctx.center - vector3(0.0, 0.0, height(ctx) * 0.1)
     return function(t)
         local u = smooth(t)
-        return sph(ctx, lerp(-40, -22, u), lerp(1.5, 7, u), lerp(1.6, 0.8, u) * d),
+        return sph(ctx, lerp(-40, -22, u), lerp(1.5, 7, u), lerp(1.5, 0.95, u) * d),
             lerp(lowered, ctx.center + vector3(0.0, ctx.max.y * 0.15, 0.0), u)
     end
 end
 
 function builders.flyby(ctx, o)
-    local side = ctx.min.x - (0.9 + ctx.radius * 0.35) / o.zoom
+    local side = ctx.min.x - (1.2 + ctx.radius * 0.5) * lensScale(ctx) / o.zoom
     local len = ctx.radius * 1.3
     local z = ctx.center.z - height(ctx) * 0.15
     return function(t)
@@ -816,7 +871,7 @@ end
 function builders.reveal(ctx, o)
     local bone = (ctx.type == 'veh' and (Scene.boneLocal('headlight_l') or Scene.boneLocal('bumper_f')))
         or (ctx.center + vector3(0.0, ctx.max.y * 0.8, 0.0))
-    local first = detailShot(ctx, 'headlight_l', bone, (0.8 + ctx.radius * 0.15) / o.zoom)
+    local first = detailShot(ctx, 'headlight_l', bone, (1.0 + ctx.radius * 0.2) * lensScale(ctx) / o.zoom)
     local a = toCyl(ctx, first.cam)
     local b = toCyl(ctx, sph(ctx, -40, o.pitch, fit(ctx, o.zoom)), a.th)
     if b.th > a.th then b.th = b.th - 2 * math.pi end -- pull back the long way round
@@ -827,7 +882,7 @@ function builders.reveal(ctx, o)
 end
 
 function builders.low_orbit(ctx, o)
-    local d = fit(ctx, o.zoom) * 0.75
+    local d = fit(ctx, o.zoom) * 0.9
     return function(t) return sph(ctx, lerp(-70, 110, smooth(t)), -4, d), ctx.center end
 end
 
