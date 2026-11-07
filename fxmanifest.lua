@@ -17,9 +17,7 @@ shared_scripts {
 -- Listed explicitly: server/webhook.lua, package.json and node_modules are
 -- leftovers from the old image-js pipeline and must not load.
 client_scripts {
-  'client/env.lua',
-  'client/scene.lua',
-  'client/shots.lua',
+  'client/greenRoom.lua', -- Env, Scene, Shots (see the note at the top of the file)
   'client/capture.lua',
   'client/ui.lua',
 }
