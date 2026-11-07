@@ -1,7 +1,9 @@
 -- Bridge to the capture page (web/app.js). Each job has an id; the page posts
 -- `result` when done and the server confirms the saved file with
 -- `kora_image_maker:client:saved`. A job settles once both have arrived (or
--- just the page result for jobs that don't save anything).
+-- just the page result for jobs that don't save anything). Discord posting is
+-- done by the server after saving: Discord rejects webhook posts made from the
+-- in-game browser (403, code 40333).
 
 ImageMaker = ImageMaker or {}
 local Capture = {}
@@ -39,7 +41,7 @@ local function settle(job)
         width = nui.width,
         height = nui.height,
         bytes = nui.bytes,
-        discord = nui.discord,
+        discord = server and server.discord or nil,
     }
     if nui.ok and job.saves then
         if server.ok then result.path = server.path else result.error = server.error end
@@ -61,11 +63,11 @@ end
 
 ---@param meta table server naming info: { kind = 'entity'|'scene'|'video', type?, model?, angle?, motion? }
 ---@param opts table capture options for app.js
----@param discord? { url: string, content: string }
----@param filename string name used for the Discord attachment
-function Capture.photo(meta, opts, discord, filename)
+---@param discord? { url: string, content: string } posted by the server once saved
+function Capture.photo(meta, opts, discord)
     local job = newJob(meta, {})
-    send('photo', { id = job.id, opts = opts, discord = discord, filename = filename })
+    job.discord = discord
+    send('photo', { id = job.id, opts = opts })
     return Citizen.Await(job.p)
 end
 
@@ -83,8 +85,9 @@ function Capture.startVideo(meta, opts)
     return job
 end
 
-function Capture.stopVideo(job, discord, filename)
-    send('recordStop', { id = job.id, discord = discord, filename = filename })
+function Capture.stopVideo(job, discord)
+    job.discord = discord
+    send('recordStop', { id = job.id })
     return Citizen.Await(job.p)
 end
 
@@ -93,17 +96,38 @@ function Capture.cancelVideo(job)
     send('cancelRecording', { id = job.id })
 end
 
-function Capture.repost(sourceId, discord)
-    local job = newJob(nil, { saves = false, timeout = 60000 })
-    send('repost', { id = job.id, sourceId = sourceId, discord = discord })
-    return Citizen.Await(job.p)
+local discordRequests = {}
+
+local function discordRequest(event, timeout, ...)
+    seq = seq + 1
+    local id = ('d%d_%d'):format(GetGameTimer(), seq)
+    local p = promise.new()
+    discordRequests[id] = p
+    SetTimeout(timeout, function()
+        if discordRequests[id] == p then
+            discordRequests[id] = nil
+            p:resolve({ ok = false, error = 'Timed out waiting for Discord.' })
+        end
+    end)
+    TriggerServerEvent(event, id, ...)
+    return Citizen.Await(p)
+end
+
+---Re-posts a file the server already saved (relative path from a result).
+function Capture.repost(path, discord)
+    return discordRequest('kora_image_maker:server:repost', 90000, path, discord)
 end
 
 function Capture.testWebhook(url, content)
-    local job = newJob(nil, { saves = false, timeout = 30000 })
-    send('testWebhook', { id = job.id, url = url, content = content })
-    return Citizen.Await(job.p)
+    return discordRequest('kora_image_maker:server:testWebhook', 30000, url, content)
 end
+
+RegisterNetEvent('kora_image_maker:client:discordResult', function(id, ok, err)
+    local p = discordRequests[id]
+    if not p then return end
+    discordRequests[id] = nil
+    p:resolve({ ok = ok == true, error = err })
+end)
 
 RegisterNUICallback('result', function(data, cb)
     cb({})
@@ -126,7 +150,7 @@ RegisterNUICallback('uploadBegin', function(data, cb)
     if not ext then return cb({ ok = false, error = ('Unsupported format %s.'):format(tostring(data.mime)) }) end
     local n = math.tointeger(tonumber(data.n))
     if not n or n < 1 then return cb({ ok = false, error = 'Bad chunk count.' }) end
-    TriggerServerEvent('kora_image_maker:server:begin', job.id, job.meta, n, tonumber(data.bytes) or 0, ext)
+    TriggerServerEvent('kora_image_maker:server:begin', job.id, job.meta, n, tonumber(data.bytes) or 0, ext, job.discord)
     cb({ ok = true })
 end)
 
@@ -163,9 +187,10 @@ RegisterNetEvent('kora_image_maker:client:chunkAck', function(id, i, ok)
     p:resolve(ok == true)
 end)
 
-RegisterNetEvent('kora_image_maker:client:saved', function(id, ok, pathOrError)
+RegisterNetEvent('kora_image_maker:client:saved', function(id, ok, pathOrError, discord)
     local job = jobs[id]
     if not job then return end
-    job.server = ok and { ok = true, path = pathOrError } or { ok = false, error = pathOrError or 'Server failed to save.' }
+    job.server = ok and { ok = true, path = pathOrError, discord = discord }
+        or { ok = false, error = pathOrError or 'Server failed to save.' }
     settle(job)
 end)

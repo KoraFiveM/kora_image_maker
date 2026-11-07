@@ -85,7 +85,10 @@ local function addHistory(entry)
     while #history > HISTORY_LIMIT do table.remove(history) end
 end
 
+local savedPaths = {} -- history id -> server-relative path, for re-posting
+
 local function recordResult(label, kind, captureId, result)
+    if result.ok and result.path then savedPaths[captureId] = result.path end
     local parts = {}
     if result.ok then
         parts[#parts + 1] = result.path or 'saved'
@@ -161,12 +164,11 @@ local function captureEntityPhotos(value)
                 if ANGLE_LABELS[angle] then
                     Room.aimPreset(angle, zoom)
                     Wait(150)
-                    local filename = angle == 'default' and ('%s.png'):format(model) or ('%s_%s.png'):format(model, angle)
                     local target = discord and { url = discord.url, content = ('**%s** · %s · %s'):format(model, typeOrErr, ANGLE_LABELS[angle]) }
                     local result = Capture.photo(
                         { kind = 'entity', type = typeOrErr, model = model, angle = angle },
                         { key = true, background = background, crop = true, maxSize = maxSize, format = 'png' },
-                        target, filename)
+                        target)
                     local captureId = ('photo_%s_%s_%d'):format(model, angle, GetGameTimer())
                     result.captureId = captureId
                     recordResult(('%s (%s)'):format(model, ANGLE_LABELS[angle]), typeOrErr, captureId, result)
@@ -234,9 +236,8 @@ local function recordEntityVideo(value)
     end
     Room.setEntityHeading(0.0)
 
-    local filename = ('%s_%s.%s'):format(model, motion, 'webm')
     local target = discord and { url = discord.url, content = ('**%s** · %s · %ds %s'):format(model, entityType, seconds, motion) }
-    local result = Capture.stopVideo(job, target, filename)
+    local result = Capture.stopVideo(job, target)
     local captureId = ('video_%s_%d'):format(model, GetGameTimer())
     recordResult(('%s %s video'):format(model, motion), 'video', captureId, result)
     if not result.ok then return refresh(notice('destructive', result.error or 'Recording failed.')) end
@@ -266,8 +267,7 @@ local function takeScenePhoto(value)
         Wait(100)
     end
     local format = value.format == 'png' and 'png' or 'jpg'
-    local result = Capture.photo({ kind = 'scene' }, { key = false, format = format, quality = 0.92 }, discord,
-        ('screenshot.%s'):format(format))
+    local result = Capture.photo({ kind = 'scene' }, { key = false, format = format, quality = 0.92 }, discord)
     hiding = false
 
     local captureId = ('scene_%d'):format(GetGameTimer())
@@ -301,7 +301,7 @@ local function recordSceneClip(value)
     end
 
     notify('Saving clip...', 'info')
-    local result = Capture.stopVideo(job, discord, 'clip.webm')
+    local result = Capture.stopVideo(job, discord)
     local captureId = ('clip_%d'):format(GetGameTimer())
     recordResult('Gameplay clip', 'video', captureId, result)
     if not result.ok then return notify(result.error or 'Recording failed.', 'error') end
@@ -351,9 +351,9 @@ local function handleAction(actionId, context)
         if derr then return notice('destructive', derr) end
         local entry
         for _, item in ipairs(history) do if item.id == context.itemId then entry = item break end end
-        if not entry then return notice('destructive', 'Capture not found.') end
+        if not entry or not savedPaths[entry.id] then return notice('destructive', 'Capture not found.') end
         discord.content = ('**%s**'):format(entry.label)
-        local result = Capture.repost(entry.id, discord)
+        local result = Capture.repost(savedPaths[entry.id], discord)
         if result.ok then return notice('success', 'Posted to Discord.') end
         return notice('destructive', result.error or 'Discord post failed.')
     end
@@ -519,7 +519,7 @@ appDefinition = function()
                 icon = 'Clock',
                 content = {
                     title = 'Captures',
-                    description = 'The last 12 can be re-posted to Discord.',
+                    description = 'Anything saved this session can be re-posted to Discord.',
                     blocks = { historyBlock() },
                 },
             },

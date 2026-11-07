@@ -4,12 +4,12 @@
 // game-texture hook, so photos and videos are taken here in the browser:
 // green-screen keying, cropping, PNG/JPEG encoding and MediaRecorder video.
 // Results go to the server in base64 chunks (relayed by client Lua as latent
-// events) and, when asked, straight to a Discord webhook.
+// events). The server posts to Discord: Discord rejects webhook calls made
+// from the in-game browser (403, code 40333).
 
 const RES = typeof GetParentResourceName === 'function' ? GetParentResourceName() : 'kora_image_maker';
 const CHUNK_CHARS = 256 * 1024;
 const DISCORD_LIMIT = 10 * 1024 * 1024;
-const STORE_LIMIT = 12;
 
 // Greenness (g - max(r, b)) thresholds: below KEY_LO is kept, above KEY_HI is
 // fully removed, in between fades. Matches the video shader's 0.12..0.31.
@@ -382,7 +382,7 @@ function stopRecording(id) {
   });
 }
 
-// --------------------------------------------------------- upload/discord
+// ------------------------------------------------------------------ upload
 
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
@@ -407,68 +407,14 @@ async function upload(id, blob) {
   }
 }
 
-function withWait(url) {
-  return url + (url.includes('?') ? '&' : '?') + 'wait=true';
-}
-
-async function discordFile(discord, blob, filename) {
-  if (blob.size > DISCORD_LIMIT) {
-    return { ok: false, error: `File is ${(blob.size / 1048576).toFixed(1)} MB, over Discord's 10 MB limit.` };
-  }
-  const form = new FormData();
-  form.append('payload_json', JSON.stringify({
-    content: discord.content || '',
-    username: 'Kora Image Maker',
-    allowed_mentions: { parse: [] },
-  }));
-  form.append('files[0]', blob, filename);
+async function deliver(id, capture) {
+  const base = { id, width: capture.width, height: capture.height, bytes: capture.blob.size, mime: capture.blob.type };
   try {
-    const res = await fetch(withWait(discord.url), { method: 'POST', body: form });
-    if (!res.ok) return { ok: false, error: `Discord ${res.status}: ${(await res.text()).slice(0, 160)}` };
-    return { ok: true };
+    await upload(id, capture.blob);
+    return { ...base, ok: true };
   } catch (err) {
-    return { ok: false, error: errorText(err) };
+    return { ...base, ok: false, error: `Saving failed: ${errorText(err)}` };
   }
-}
-
-async function discordText(url, content) {
-  try {
-    const res = await fetch(withWait(url), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, username: 'Kora Image Maker', allowed_mentions: { parse: [] } }),
-    });
-    if (!res.ok) return { ok: false, error: `Discord ${res.status}: ${(await res.text()).slice(0, 160)}` };
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: errorText(err) };
-  }
-}
-
-// Recent captures stay in memory so the history list can re-post them.
-const store = new Map();
-function remember(id, blob, filename) {
-  store.set(id, { blob, filename });
-  while (store.size > STORE_LIMIT) store.delete(store.keys().next().value);
-}
-
-// Uploads to the server and posts to Discord in parallel; upload decides ok.
-const EXT_BY_MIME = { 'image/png': 'png', 'image/jpeg': 'jpg', 'video/webm': 'webm', 'video/mp4': 'mp4' };
-function filenameFor(name, mime) {
-  const ext = EXT_BY_MIME[String(mime).split(';')[0]] || 'bin';
-  return `${String(name || 'capture').replace(/\.[^.]+$/, '')}.${ext}`;
-}
-
-async function deliver(id, msg, capture) {
-  const filename = filenameFor(msg.filename, capture.blob.type);
-  remember(id, capture.blob, filename);
-  const [up, discord] = await Promise.all([
-    upload(id, capture.blob).then(() => null, (err) => errorText(err)),
-    msg.discord ? discordFile(msg.discord, capture.blob, filename) : Promise.resolve(undefined),
-  ]);
-  const base = { id, width: capture.width, height: capture.height, bytes: capture.blob.size, mime: capture.blob.type, discord };
-  if (up) return { ...base, ok: false, error: `Saving failed: ${up}` };
-  return { ...base, ok: true };
 }
 
 // ---------------------------------------------------------------- messages
@@ -476,7 +422,7 @@ async function deliver(id, msg, capture) {
 const handlers = {
   async photo(msg) {
     const capture = await capturePhoto(msg.opts || {});
-    return deliver(msg.id, msg, capture);
+    return deliver(msg.id, capture);
   },
 
   async recordStart(msg) {
@@ -491,19 +437,7 @@ const handlers = {
 
   async recordStop(msg) {
     const capture = await stopRecording(msg.id);
-    return deliver(msg.id, msg, capture);
-  },
-
-  async repost(msg) {
-    const entry = store.get(msg.sourceId);
-    if (!entry) return { id: msg.id, ok: false, error: 'That capture is no longer in memory (only the last 12 are kept).' };
-    const discord = await discordFile(msg.discord, entry.blob, entry.filename);
-    return { id: msg.id, ok: discord.ok, error: discord.error, discord };
-  },
-
-  async testWebhook(msg) {
-    const discord = await discordText(msg.url, msg.content || 'Kora Image Maker webhook test.');
-    return { id: msg.id, ok: discord.ok, error: discord.error, discord };
+    return deliver(msg.id, capture);
   },
 
   async cancelRecording(msg) {
