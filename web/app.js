@@ -8,7 +8,7 @@
 // from the in-game browser (403, code 40333).
 
 const RES = typeof GetParentResourceName === 'function' ? GetParentResourceName() : 'kora_image_maker';
-const CHUNK_CHARS = 256 * 1024;
+const CHUNK_CHARS = 64 * 1024;
 const DISCORD_LIMIT = 10 * 1024 * 1024;
 
 // Greenness (g - max(r, b)) thresholds: below KEY_LO is kept, above KEY_HI is
@@ -401,9 +401,16 @@ async function upload(id, blob) {
   const n = Math.max(1, Math.ceil(b64.length / CHUNK_CHARS));
   const begin = await post('uploadBegin', { id, n, bytes: blob.size, mime: blob.type });
   if (!begin.ok) throw new Error(begin.error || 'Upload was refused.');
-  for (let i = 0; i < n; i++) {
-    const res = await post('uploadChunk', { id, i, data: b64.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS) });
-    if (!res.ok) throw new Error(res.error || 'Upload chunk was refused.');
+  // Uploads are rate-limited by the server, so big videos take a while: show progress.
+  const showProgress = n > 4 && !recording;
+  try {
+    for (let i = 0; i < n; i++) {
+      if (showProgress) overlay(true, `Saving ${Math.floor((i / n) * 100)}%`, `${(blob.size / 1048576).toFixed(1)} MB`);
+      const res = await post('uploadChunk', { id, i, data: b64.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS) });
+      if (!res.ok) throw new Error(res.error || 'Upload chunk was refused.');
+    }
+  } finally {
+    if (showProgress) overlay(false);
   }
 }
 

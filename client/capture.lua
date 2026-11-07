@@ -9,8 +9,8 @@ ImageMaker = ImageMaker or {}
 local Capture = {}
 ImageMaker.capture = Capture
 
-local LATENT_BPS = 2 * 1024 * 1024
 local CHUNK_ACK_TIMEOUT = 30000
+local BEGIN_TIMEOUT = 15000
 local jobs = {}
 local seq = 0
 
@@ -150,8 +150,30 @@ RegisterNUICallback('uploadBegin', function(data, cb)
     if not ext then return cb({ ok = false, error = ('Unsupported format %s.'):format(tostring(data.mime)) }) end
     local n = math.tointeger(tonumber(data.n))
     if not n or n < 1 then return cb({ ok = false, error = 'Bad chunk count.' }) end
+
+    -- The server answers with the upload speed that stays under its latent
+    -- event rate limit (see server.js safeLatentBps).
+    local p = promise.new()
+    job.begin = p
+    SetTimeout(BEGIN_TIMEOUT, function()
+        if job.begin == p then p:resolve({ ok = false, error = 'Server did not answer the upload request.' }) end
+    end)
     TriggerServerEvent('kora_image_maker:server:begin', job.id, job.meta, n, tonumber(data.bytes) or 0, ext, job.discord)
-    cb({ ok = true })
+    local ack = Citizen.Await(p)
+    job.begin = nil
+    if not ack.ok then return cb({ ok = false, error = ack.error }) end
+    job.bps = ack.bps
+    cb({ ok = true, bps = ack.bps })
+end)
+
+RegisterNetEvent('kora_image_maker:client:beginAck', function(id, ok, value)
+    local job = jobs[id]
+    if not job or not job.begin then return end
+    if ok then
+        job.begin:resolve({ ok = true, bps = math.tointeger(tonumber(value)) or 75000 })
+    else
+        job.begin:resolve({ ok = false, error = value or 'Upload was refused.' })
+    end
 end)
 
 -- One chunk in flight at a time: the page waits on this callback, which waits
@@ -173,7 +195,7 @@ RegisterNUICallback('uploadChunk', function(data, cb)
             p:resolve(false)
         end
     end)
-    TriggerLatentServerEvent('kora_image_maker:server:chunk', LATENT_BPS, job.id, i, data.data)
+    TriggerLatentServerEvent('kora_image_maker:server:chunk', job.bps or 75000, job.id, i, data.data)
 
     if Citizen.Await(p) then return cb({ ok = true }) end
     cb({ ok = false, error = 'Server did not confirm the upload.' })

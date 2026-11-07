@@ -11,8 +11,8 @@ const https = require('https');
 const RES = GetCurrentResourceName();
 const ROOT = GetResourcePath(RES);
 const MAX_BYTES = 60 * 1024 * 1024;
-const MAX_CHUNKS = 4096;
-const UPLOAD_TIMEOUT = 5 * 60 * 1000;
+const MAX_CHUNKS = 8192;
+const UPLOAD_TIMEOUT = 15 * 60 * 1000;
 
 const SAFE_NAME = /^[A-Za-z0-9_\-]{1,64}$/;
 const TYPES = new Set(['veh', 'ped', 'obj']);
@@ -24,6 +24,14 @@ const DISCORD_UA = 'DiscordBot (https://github.com/KoraFiveM/kora_image_maker, 1
 const MIME = { png: 'image/png', jpg: 'image/jpeg', webm: 'video/webm', mp4: 'video/mp4' };
 
 const uploads = new Map();
+
+// FXServer drops a player sending more than rateLimiter_latentEventFlood_rate
+// latent-event fragments per second (default 150; fragments are ~1 KB). Upload
+// at half that so other resources' latent traffic and retries have room.
+function safeLatentBps() {
+	const rate = GetConvarInt('rateLimiter_latentEventFlood_rate', 150);
+	return Math.max(32 * 1024, Math.floor(rate * 1000 * 0.5));
+}
 
 function webhookUrl(url) {
 	if (typeof url !== 'string') return null;
@@ -142,6 +150,10 @@ function targetFor(meta, ext) {
 	return null;
 }
 
+function beginAck(src, id, ok, value) {
+	emitNet('kora_image_maker:client:beginAck', src, id, ok, value);
+}
+
 function reply(src, id, ok, value, discord) {
 	emitNet('kora_image_maker:client:saved', src, id, ok, value, discord);
 }
@@ -213,13 +225,13 @@ onNet('kora_image_maker:server:begin', (id, meta, n, bytes, ext, discord) => {
 	if (typeof id !== 'string' || id.length > 64) return;
 	const key = `${src}:${id}`;
 
-	if (!isAdmin(src)) return reply(src, id, false, 'Admin permission required.');
-	if (!Number.isInteger(n) || n < 1 || n > MAX_CHUNKS) return reply(src, id, false, 'Bad chunk count.');
+	if (!isAdmin(src)) return beginAck(src, id, false, 'Admin permission required.');
+	if (!Number.isInteger(n) || n < 1 || n > MAX_CHUNKS) return beginAck(src, id, false, 'Bad chunk count.');
 	if (typeof bytes === 'number' && bytes > MAX_BYTES) {
-		return reply(src, id, false, `File is over the ${MAX_BYTES / 1048576} MB limit.`);
+		return beginAck(src, id, false, `File is over the ${MAX_BYTES / 1048576} MB limit.`);
 	}
 	const rel = targetFor(meta, ext);
-	if (!rel) return reply(src, id, false, 'Invalid capture name or format.');
+	if (!rel) return beginAck(src, id, false, 'Invalid capture name or format.');
 
 	drop(key, src, id);
 	uploads.set(key, {
@@ -232,6 +244,7 @@ onNet('kora_image_maker:server:begin', (id, meta, n, bytes, ext, discord) => {
 		parts: new Array(n),
 		timer: setTimeout(() => drop(key, src, id, 'Upload timed out.'), UPLOAD_TIMEOUT),
 	});
+	beginAck(src, id, true, safeLatentBps());
 });
 
 onNet('kora_image_maker:server:chunk', (id, i, data) => {
