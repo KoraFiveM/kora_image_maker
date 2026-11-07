@@ -62,9 +62,87 @@ local function drawRoom()
     end
 end
 
+-- Invisible collision floor so vehicles rest on their wheels: frozen in mid-air
+-- the suspension hangs at full droop. Tiles of the first prop that exists,
+-- top flush with the drawn floor. Containers exist in every game build.
+local PLATFORM_MODELS = { 'stt_prop_stunt_bblock_huge_01', 'prop_container_01a' }
+local PLATFORM_MAX_TILES = 64
+local platform = {}
+
+local function clearPlatform()
+    for _, tile in ipairs(platform) do
+        if DoesEntityExist(tile) then Kora.entities.remove(tile) end
+    end
+    platform = {}
+end
+
+---@return boolean built
+local function buildPlatform(vehMin, vehMax)
+    clearPlatform()
+    local needW, needD = (vehMax.x - vehMin.x) + 2.0, (vehMax.y - vehMin.y) + 2.0
+    local parked = vec3(ROOM.x, ROOM.y, FLOOR - 80.0)
+    for _, model in ipairs(PLATFORM_MODELS) do
+        if IsModelInCdimage(joaat(model)) then
+            local first = Kora.entities.create(model, parked, { freeze = true, heading = 0.0 })
+            if first then
+                local pmin, pmax = GetModelDimensions(GetEntityModel(first))
+                local w, d = pmax.x - pmin.x, pmax.y - pmin.y
+                local nx, ny = math.max(1, math.ceil(needW / w)), math.max(1, math.ceil(needD / d))
+                if w > 0.5 and d > 0.5 and nx * ny <= PLATFORM_MAX_TILES then
+                    local tiles = { first }
+                    for i = 2, nx * ny do
+                        tiles[i] = Kora.entities.create(model, parked, { freeze = true, heading = 0.0 }) or nil
+                    end
+                    local i = 0
+                    for ix = 0, nx - 1 do
+                        for iy = 0, ny - 1 do
+                            i = i + 1
+                            local tile = tiles[i]
+                            if tile then
+                                SetEntityCoordsNoOffset(tile,
+                                    ROOM.x + (ix - (nx - 1) / 2) * w - (pmin.x + pmax.x) / 2,
+                                    ROOM.y + (iy - (ny - 1) / 2) * d - (pmin.y + pmax.y) / 2,
+                                    FLOOR - pmax.z, false, false, false)
+                                SetEntityHeading(tile, 0.0)
+                                FreezeEntityPosition(tile, true)
+                                SetEntityCollision(tile, true, true)
+                                SetEntityVisible(tile, false, false)
+                                platform[#platform + 1] = tile
+                            end
+                        end
+                    end
+                    return true
+                end
+                Kora.entities.remove(first)
+            end
+        end
+    end
+    return false
+end
+
+-- Drops the vehicle onto the platform and freezes it once the suspension settles.
+local function settleVehicle(entity, min)
+    if not buildPlatform(min, select(2, GetModelDimensions(GetEntityModel(entity)))) then return end
+    SetEntityCoordsNoOffset(entity, ROOM.x, ROOM.y, FLOOR - min.z + 0.15, false, false, false)
+    SetEntityHeading(entity, 0.0)
+    SetVehicleHandbrake(entity, true)
+    FreezeEntityPosition(entity, false)
+    ActivatePhysics(entity)
+    SetVehicleOnGroundProperly(entity)
+    Wait(250)
+    local deadline = GetGameTimer() + 2500
+    while GetGameTimer() < deadline do
+        if IsVehicleOnAllWheels(entity) and GetEntitySpeed(entity) < 0.02 then break end
+        Wait(50)
+    end
+    Wait(150)
+    FreezeEntityPosition(entity, true)
+end
+
 local function removeEntity()
     if state.entity and DoesEntityExist(state.entity) then Kora.entities.remove(state.entity) end
     state.entity, state.model, state.type, state.center, state.radius = nil, nil, nil, nil, nil
+    clearPlatform()
 end
 
 function Room.isActive() return state.active end
@@ -157,6 +235,7 @@ function Room.spawn(model, opts)
     end
 
     local min, max = GetModelDimensions(GetEntityModel(entity))
+    if entityType == 'veh' then settleVehicle(entity, min) end
     state.entity, state.model, state.type = entity, model, entityType
     state.center = (min + max) / 2
     state.radius = math.max(#(max - min) / 2, 0.15)

@@ -312,10 +312,19 @@ function pickBitrate(opts, height) {
   return Math.max(1000000, Math.min(base, fit));
 }
 
-function overlay(show, text, hint) {
-  document.getElementById('rec').style.display = show ? 'block' : 'none';
-  if (text !== undefined) document.getElementById('rec-text').textContent = text;
-  if (hint !== undefined) document.getElementById('rec-hint').textContent = hint || '';
+// Status card with a progress bar. state: { mode: 'rec'|'save', text, hint, progress (0..1 or null) }
+function overlay(show, state) {
+  const el = document.getElementById('rec');
+  el.style.display = show ? 'block' : 'none';
+  if (!show || !state) return;
+  el.className = state.mode === 'save' ? 'save' : '';
+  if (state.text !== undefined) document.getElementById('rec-text').textContent = state.text;
+  if (state.hint !== undefined) document.getElementById('rec-hint').textContent = state.hint || '';
+  const known = typeof state.progress === 'number';
+  const p = known ? Math.max(0, Math.min(1, state.progress)) : 0;
+  document.getElementById('rec-track').style.display = known ? 'block' : 'none';
+  document.getElementById('rec-fill').style.width = `${(p * 100).toFixed(1)}%`;
+  document.getElementById('rec-pct').textContent = known ? `${Math.floor(p * 100)}%` : '';
 }
 
 function clock(ms) {
@@ -354,8 +363,18 @@ async function startRecording(id, opts) {
   recorder.start(1000);
 
   const started = performance.now();
-  const ticker = setInterval(() => overlay(true, `REC ${clock(performance.now() - started)}`), 250);
-  overlay(true, 'REC 0:00', opts.hint || '');
+  const total = opts.seconds > 0 ? opts.seconds * 1000 : 0;
+  const recState = () => {
+    const ms = performance.now() - started;
+    return {
+      mode: 'rec',
+      text: `Recording ${clock(ms)}${total ? ` / ${clock(total)}` : ''}`,
+      hint: opts.hint || '',
+      progress: total ? ms / total : null,
+    };
+  };
+  const ticker = setInterval(() => overlay(true, recState()), 200);
+  overlay(true, recState());
 
   recording = { id, recorder, chunks, mime, stream, gv, ticker, width: out.width, height: out.height, started };
 }
@@ -403,9 +422,19 @@ async function upload(id, blob) {
   if (!begin.ok) throw new Error(begin.error || 'Upload was refused.');
   // Uploads are rate-limited by the server, so big videos take a while: show progress.
   const showProgress = n > 4 && !recording;
+  const mb = blob.size / 1048576;
+  const started = performance.now();
   try {
     for (let i = 0; i < n; i++) {
-      if (showProgress) overlay(true, `Saving ${Math.floor((i / n) * 100)}%`, `${(blob.size / 1048576).toFixed(1)} MB`);
+      if (showProgress) {
+        const left = i > 0 ? ((performance.now() - started) / i) * (n - i) : null;
+        overlay(true, {
+          mode: 'save',
+          text: 'Saving to server',
+          hint: `${((mb * i) / n).toFixed(1)} / ${mb.toFixed(1)} MB${left ? ` · about ${clock(left + 999)} left` : ''}`,
+          progress: i / n,
+        });
+      }
       const res = await post('uploadChunk', { id, i, data: b64.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS) });
       if (!res.ok) throw new Error(res.error || 'Upload chunk was refused.');
     }
