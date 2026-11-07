@@ -136,6 +136,13 @@ function targetFor(meta, ext) {
 		const name = angle === 'default' ? meta.model : `${meta.model}_${angle}`;
 		return `images/${meta.type}/${name}.${ext}`;
 	}
+	if (meta.kind === 'shot') {
+		// Photos with a real background: never overwrite the image library.
+		if (!IMAGE_EXT.has(ext)) return null;
+		const model = SAFE_NAME.test(meta.model || '') ? meta.model : 'shot';
+		const angle = SAFE_NAME.test(meta.angle || '') ? `_${meta.angle}` : '';
+		return unique(`captures/photos/${model}${angle}_${stamp()}.${ext}`);
+	}
 	if (meta.kind === 'scene') {
 		if (!IMAGE_EXT.has(ext)) return null;
 		return unique(`captures/photos/scene_${stamp()}.${ext}`);

@@ -5,7 +5,7 @@ game "gta5"
 
 name 'kora_image_maker'
 author 'Jamie'
-description 'Green-room photo/video capture with Discord posting'
+description 'Vehicle/ped/prop photo & cinematic video studio with Discord posting'
 
 dependency 'kora_lib'
 dependency 'kora_core'
@@ -17,7 +17,9 @@ shared_scripts {
 -- Listed explicitly: server/webhook.lua, package.json and node_modules are
 -- leftovers from the old image-js pipeline and must not load.
 client_scripts {
-  'client/greenRoom.lua',
+  'client/env.lua',
+  'client/scene.lua',
+  'client/shots.lua',
   'client/capture.lua',
   'client/ui.lua',
 }

@@ -226,13 +226,21 @@ function keyPixels(d, w, h, bg) {
   return maxX < 0 ? null : { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }
 
+// Largest centred rect of the given aspect (w/h) inside w x h. aspect <= 0 keeps it all.
+function aspectRect(w, h, aspect) {
+  if (!(aspect > 0)) return { x: 0, y: 0, w, h };
+  let cw = w, ch = Math.round(w / aspect);
+  if (ch > h) { ch = h; cw = Math.round(h * aspect); }
+  return { x: Math.floor((w - cw) / 2), y: Math.floor((h - ch) / 2), w: cw, h: ch };
+}
+
 function toBlob(canvas, mime, quality) {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not encode the image.'))), mime, quality);
   });
 }
 
-// opts: { key, background: 'transparent'|'black'|'white'|'green', crop, padding, maxSize, format: 'png'|'jpg', quality }
+// opts: { key, background: 'transparent'|'black'|'white'|'green', crop, padding, maxSize, format: 'png'|'jpg', quality, aspect }
 async function capturePhoto(opts) {
   if (recording) throw new Error('A recording is in progress.');
   const gv = view();
@@ -253,7 +261,7 @@ async function capturePhoto(opts) {
   const ctx = src.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(gv.canvas, 0, 0);
 
-  let region = { x: 0, y: 0, w, h };
+  let region = aspectRect(w, h, opts.key && opts.crop !== false ? 0 : opts.aspect);
   if (opts.key) {
     const img = ctx.getImageData(0, 0, w, h);
     const bg = BACKGROUNDS[opts.background] || null;
@@ -332,7 +340,7 @@ function clock(ms) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-// opts: { key, background, height, fps, seconds, discord, hint }
+// opts: { key, background, height (short side), fps, seconds, discord, hint, aspect }
 async function startRecording(id, opts) {
   if (recording) throw new Error('A recording is already in progress.');
   const mime = pickVideoMime();
@@ -343,18 +351,22 @@ async function startRecording(id, opts) {
   gv.key = !!opts.key;
   gv.bg = BACKGROUNDS[opts.background] || BACKGROUNDS.black;
 
-  const height = Math.min(opts.height > 0 ? opts.height : window.innerHeight, window.innerHeight);
-  const width = Math.round((height * window.innerWidth) / window.innerHeight / 2) * 2;
+  // Crop the game view to the chosen shape, then scale so the short side is
+  // the chosen resolution (never upscaled, long side capped for the encoder).
+  const src = aspectRect(window.innerWidth, window.innerHeight, opts.aspect);
+  const shortSide = Math.min(src.w, src.h);
+  let scale = Math.min(1, (opts.height > 0 ? opts.height : shortSide) / shortSide);
+  scale = Math.min(scale, 2560 / Math.max(src.w, src.h));
   const out = document.createElement('canvas');
-  out.width = width;
-  out.height = Math.round(height / 2) * 2;
+  out.width = Math.max(2, Math.round((src.w * scale) / 2) * 2);
+  out.height = Math.max(2, Math.round((src.h * scale) / 2) * 2);
   const ctx = out.getContext('2d');
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  gv.onFrame = () => ctx.drawImage(gv.canvas, 0, 0, out.width, out.height);
+  gv.onFrame = () => ctx.drawImage(gv.canvas, src.x, src.y, src.w, src.h, 0, 0, out.width, out.height);
 
   const stream = out.captureStream(opts.fps > 0 ? opts.fps : 30);
-  const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: pickBitrate(opts, out.height) });
+  const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: pickBitrate(opts, Math.min(out.width, out.height)) });
   const chunks = [];
   recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
 
