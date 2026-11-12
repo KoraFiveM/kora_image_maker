@@ -1,0 +1,10 @@
+# Generated output: the model image library and saved photos/videos.
+images/
+captures/
+
+# Leftovers from the old image-js pipeline (not loaded by fxmanifest.lua).
+node_modules/
+package.json
+yarn.lock
+server/webhook.lua
+web/assets/

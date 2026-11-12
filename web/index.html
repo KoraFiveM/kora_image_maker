@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>kora_image_maker</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; font-family: system-ui, sans-serif; }
+    /* CEF layers never reach the game-view texture, so this indicator is visible
+       to the player but not in the recording. */
+    #rec {
+      display: none; position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+      width: 340px; padding: 12px 16px 14px; border-radius: 12px; background: rgba(15, 15, 18, .9); color: #fff;
+      font-size: 15px; font-weight: 600; letter-spacing: .02em; white-space: nowrap;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, .35);
+    }
+    #rec .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    #rec .dot { display: inline-block; flex: none; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%; background: #ef4444; animation: blink 1s infinite; }
+    #rec.save .dot { background: #a3e635; animation: none; }
+    #rec .title { display: flex; align-items: center; overflow: hidden; text-overflow: ellipsis; }
+    #rec .pct { font-variant-numeric: tabular-nums; }
+    #rec .track { height: 8px; margin-top: 10px; border-radius: 999px; background: rgba(255, 255, 255, .15); overflow: hidden; }
+    #rec .fill { height: 100%; width: 0; border-radius: 999px; background: #ef4444; transition: width .25s linear; }
+    #rec.save .fill { background: #a3e635; }
+    #rec .hint { margin-top: 8px; font-size: 13px; font-weight: 400; opacity: .75; overflow: hidden; text-overflow: ellipsis; }
+    #rec .hint:empty { display: none; }
+    @keyframes blink { 50% { opacity: .25; } }
+  </style>
+</head>
+<body>
+  <div id="rec">
+    <div class="row"><span class="title"><span class="dot"></span><span id="rec-text">REC 0:00</span></span><span class="pct" id="rec-pct"></span></div>
+    <div class="track" id="rec-track"><div class="fill" id="rec-fill"></div></div>
+    <div class="hint" id="rec-hint"></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
