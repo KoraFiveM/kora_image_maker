@@ -1,0 +1,38 @@
+name: Performance Issue
+description: Report a slowdown or high resource usage in kora_image_maker.
+title: '[Performance]: '
+labels:
+- performance
+- needs-triage
+body:
+- type: input
+  id: resource
+  attributes:
+    label: Affected component
+    placeholder: For example, Image generation, Asset dimensions and formats, Batch processing, Output quality
+  validations:
+    required: true
+- type: input
+  id: version
+  attributes:
+    label: kora_image_maker version or commit
+  validations:
+    required: true
+- type: textarea
+  id: impact
+  attributes:
+    label: Performance impact
+    description: Include the affected page or action, load or response times, and browser or server profiling data where available.
+  validations:
+    required: true
+- type: textarea
+  id: reproduce
+  attributes:
+    label: Steps to reproduce
+  validations:
+    required: true
+- type: textarea
+  id: environment
+  attributes:
+    label: Environment and profiling evidence
+    description: Include the browser or runtime version, device, input size, and sanitized logs or profiling evidence.
