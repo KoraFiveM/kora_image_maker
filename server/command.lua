@@ -17,9 +17,15 @@ TriggerClientEvent('chat:addSuggestion', -1, '/image_maker', 'Open the image mak
 RegisterNetEvent('kora_image_maker:server:diag', function(message)
     local src = source
     if type(message) ~= 'string' or not exports['kora_core']:hasPermission(src, 'admin') then return end
-    print(('[kora_image_maker] %s: %s'):format(GetPlayerName(src) or src, message:sub(1, 300)))
+    Kora.logging.info('client.diag', 'Client diagnostic', { playerId = src, message = message:sub(1, 300) })
 end)
 
 RegisterNetEvent('kora_image_maker:server:clientError', function(tag, ...)
-    print(('[kora_image_maker] client error from %s: %s'):format(GetPlayerName(source) or source, tag), ...)
+    local details = {}
+    for index = 1, select('#', ...) do details[index] = tostring((select(index, ...))):sub(1, 100) end
+    Kora.logging.warn('client.error_reported', 'Client reported an error', {
+        playerId = source,
+        tag = tostring(tag):sub(1, 200),
+        details = table.concat(details, ' '),
+    })
 end)
