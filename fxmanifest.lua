@@ -23,6 +23,7 @@ client_scripts {
 }
 
 server_scripts {
+  '@kora_lib/modules/logging/adapters/server.js',
   'server/command.lua',
   'server/server.js',
 }

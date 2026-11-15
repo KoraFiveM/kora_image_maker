@@ -95,15 +95,11 @@ function discordPost(url, content, file) {
 	});
 }
 
-function log(...args) {
-	console.log('[kora_image_maker]', ...args);
-}
-
 function isAdmin(src) {
 	try {
 		return !!exports.kora_core.hasPermission(src, 'admin');
 	} catch (err) {
-		log('permission check failed:', err.message);
+		KoraLogger.error('permission.check_failed', 'Permission check failed', { error: err.message });
 		return false;
 	}
 }
@@ -170,7 +166,7 @@ function drop(key, src, id, error) {
 	if (upload) clearTimeout(upload.timer);
 	uploads.delete(key);
 	if (error) {
-		log(`upload ${id} from ${GetPlayerName(src) || src} failed: ${error}`);
+		KoraLogger.warn('upload.failed', 'Upload failed', { uploadId: id, playerId: src, error: String(error) });
 		reply(src, id, false, error);
 	}
 }
@@ -187,16 +183,16 @@ async function finalize(key, upload) {
 		const full = path.join(ROOT, rel);
 		fs.mkdirSync(path.dirname(full), { recursive: true });
 		fs.writeFileSync(full, buf);
-		log(`saved ${rel} (${(buf.length / 1024).toFixed(0)} KB) for ${GetPlayerName(src) || src}`);
+		KoraLogger.info('upload.saved', 'Image saved', { path: rel, sizeKb: Math.round(buf.length / 1024), playerId: src });
 	} catch (err) {
-		log(`could not save ${rel}: ${err.message}`);
+		KoraLogger.error('upload.save_failed', 'Could not save image', { path: rel, error: err.message });
 		return reply(src, id, false, `Could not save: ${err.message}`);
 	}
 
 	let discord;
 	if (upload.discord) {
 		discord = await discordPost(upload.discord.url, upload.discord.content, { name: path.basename(rel), buf });
-		if (!discord.ok) log(`Discord post of ${rel} failed: ${discord.error}`);
+		if (!discord.ok) KoraLogger.warn('discord.post_failed', 'Discord post failed', { path: rel, error: discord.error });
 	}
 	reply(src, id, true, rel, discord);
 }
