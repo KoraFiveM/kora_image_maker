@@ -1,36 +1,50 @@
-name: Feature Request
+name: Feature request
 description: Suggest an improvement to kora_image_maker.
 title: '[Feature]: '
 labels:
-- enhancement
-- needs-triage
+  - enhancement
+  - needs-triage
 body:
-- type: textarea
-  id: problem
-  attributes:
-    label: What problem would this solve?
-    description: Describe the current workflow in kora_image_maker and where it falls short.
-  validations:
-    required: true
-- type: textarea
-  id: proposal
-  attributes:
-    label: Proposed solution
-  validations:
-    required: true
-- type: textarea
-  id: alternatives
-  attributes:
-    label: Alternatives considered
-- type: input
-  id: component
-  attributes:
-    label: Affected component (optional)
-    placeholder: For example, Image generation, Asset dimensions and formats, Batch processing, Output quality
-- type: checkboxes
-  id: checks
-  attributes:
-    label: Checklist
-    options:
-    - label: I searched for an existing feature request.
+  - type: markdown
+    attributes:
+      value: >-
+        Search existing issues first and report one problem at a time. Remove passwords, tokens,
+        connection strings and player identifiers from text and attachments. For a suspected
+        vulnerability, use the repository Security tab or its security policy instead of a public
+        issue.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do?
+      description: Describe the problem or workflow in kora_image_maker that you want to improve.
+    validations:
       required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: How should it work?
+      description: Describe the result you would like. A concrete example helps.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part is affected?
+      options:
+        - Studio and scene setup
+        - Image capture
+        - Video capture
+        - Discord posting
+        - Other / not sure
+  - type: textarea
+    id: context
+    attributes:
+      label: Resource details (optional)
+      description: >-
+        Name the vehicle/ped/prop model, studio/camera setup and capture mode. Say whether preview,
+        image/video capture or Discord posting failed.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or examples (optional)
+      description: Mention a workaround, another approach, or an image/link that explains the idea.
