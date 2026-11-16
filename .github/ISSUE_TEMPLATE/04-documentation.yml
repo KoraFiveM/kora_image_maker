@@ -28,7 +28,7 @@ body:
         short.
     validations:
       required: true
-  - type: input
+  - type: textarea
     id: version
     attributes:
       label: Documentation/resource version (optional)
